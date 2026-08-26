@@ -1,3 +1,4 @@
+
 [file name]: This is a Kotlin Multiplatform project targeting.txt
 [file content begin]
 This is a Kotlin Multiplatform project targeting Android, iOS, Web, Desktop (JVM).
@@ -63,6 +64,13 @@ Use the run button in your IDE's editor gutter, or run tests using Gradle tasks:
 - Kotlinx-datetime - date and time handling
 - Ktor Client - HTTP requests to REST API
 - Coroutines - asynchronous programming
+
+### Screenshots
+
+<img width="200" height="430" alt="IMG_4997" src="https://github.com/user-attachments/assets/b094bc76-fc40-45fd-aaa9-cf321e30a3b8" />
+<img width="200" height="430" alt="IMG_4998" src="https://github.com/user-attachments/assets/ba1876eb-6fc2-4684-93c1-5ba64afb6cf2" />
+<img width="200" height="430" alt="IMG_4999" src="https://github.com/user-attachments/assets/d3f3f864-e578-487c-bc67-1a94dca7ddf7" />
+
 
 ### API Endpoints
 
