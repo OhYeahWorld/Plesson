@@ -1,16 +1,36 @@
+[file name]: This is a Kotlin Multiplatform project targeting.txt
+[file content begin]
 This is a Kotlin Multiplatform project targeting Android, iOS, Web, Desktop (JVM).
 
-* [/iosApp](./iosApp/iosApp) contains an iOS application. Even if you’re sharing your UI with Compose Multiplatform,
+## Schedule Viewer Application (PLesson)
+
+This is a schedule viewing application for educational groups. It provides the following functionality:
+- View weekly schedule with day-to-day navigation
+- Select and switch between different study groups
+- Search for groups by name
+- Display lesson details (time, subject, teacher, classroom)
+
+* [/iosApp](./iosApp/iosApp) contains an iOS application. Even if you're sharing your UI with Compose Multiplatform,
   you need this entry point for your iOS app. This is also where you should add SwiftUI code for your project.
 
 * [/shared](./shared/src) is for code that will be shared across your Compose Multiplatform applications.
   It contains several subfolders:
-  - [commonMain](./shared/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./shared/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./shared/src/jvmMain/kotlin)
-    folder is the appropriate location.
+  - [commonMain](./shared/src/commonMain/kotlin) is for code that's common for all targets.
+    This includes the main UI logic (App.kt), data models (Day, Group, Lesson), and the REST client.
+  - [androidMain](./shared/src/androidMain/kotlin) contains Android-specific implementations.
+  - [iosMain](./shared/src/iosMain/kotlin) contains iOS-specific implementations (e.g., for Apple's CoreCrypto).
+  - [jvmMain](./shared/src/jvmMain/kotlin) contains Desktop (JVM) specific implementations.
+  - [jsMain](./shared/src/jsMain/kotlin) contains JavaScript/Web specific implementations.
+  - [wasmJsMain](./shared/src/wasmJsMain/kotlin) contains WebAssembly specific implementations.
+
+### Application Features
+
+- Weekly schedule display with horizontal navigation between days
+- Group search functionality with real-time filtering
+- Automatic selection of the current working day on app load
+- Responsive interface optimized for mobile and desktop
+- Material Theme support with both light and dark themes
+- Lazy loading optimization using LazyColumn and LazyRow components
 
 ### Running the apps
 
@@ -36,6 +56,20 @@ Use the run button in your IDE's editor gutter, or run tests using Gradle tasks:
   - JS target: `./gradlew :shared:jsTest`
 - iOS tests: `./gradlew :shared:iosSimulatorArm64Test`
 
+### Technology Stack
+
+- Kotlin Multiplatform - cross-platform development
+- Compose Multiplatform - declarative UI framework
+- Kotlinx-datetime - date and time handling
+- Ktor Client - HTTP requests to REST API
+- Coroutines - asynchronous programming
+
+### API Endpoints
+
+The application uses a REST API to fetch data:
+- `GET /schedule/week/{group_guid}` - retrieve weekly schedule for a group
+- `GET /groups` - retrieve list of all available groups
+
 ---
 
 Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html),
@@ -44,3 +78,4 @@ Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-mu
 
 We would appreciate your feedback on Compose/Web and Kotlin/Wasm in the public Slack channel [#compose-web](https://slack-chats.kotlinlang.org/c/compose-web).
 If you face any issues, please report them on [YouTrack](https://youtrack.jetbrains.com/newIssue?project=CMP).
+[file content end]
