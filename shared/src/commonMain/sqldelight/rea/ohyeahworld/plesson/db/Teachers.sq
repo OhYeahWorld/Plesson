@@ -1,0 +1,39 @@
+-- CRUD: преподаватели и связи M:M с занятиями
+selectAllTeachers:
+SELECT * FROM teachers ORDER BY teacher_name ASC;
+
+upsertTeacher:
+INSERT INTO teachers(teacher_slug, teacher_name)
+VALUES(:slug, :name)
+ON CONFLICT(teacher_slug) DO UPDATE SET teacher_name = excluded.teacher_name;
+
+replaceDepartments:
+DELETE FROM teacher_departments WHERE slug = :slug;
+
+insertDepartment:
+INSERT INTO teacher_departments(slug, department) VALUES(:slug, :department);
+
+departmentsForTeacher:
+SELECT td.department AS department
+FROM teacher_departments td
+WHERE td.slug = :slug
+ORDER BY td.department ASC;
+
+linkLessonTeacher:
+INSERT OR IGNORE INTO lesson_teachers(lesson_id, teacher_slug)
+VALUES(:lesson_id, :teacher_slug);
+
+unlinkByLessonIds:
+DELETE FROM lesson_teachers
+WHERE lesson_id IN (
+    SELECT id FROM lessons WHERE group_guid = :group_guid AND day BETWEEN :from_day AND :to_day
+);
+
+teachersForLessons:
+SELECT lt.lesson_id AS lesson_id, t.teacher_name AS teacher_name
+FROM lesson_teachers lt
+JOIN teachers t ON t.teacher_slug = lt.teacher_slug
+WHERE lt.lesson_id IN (
+    SELECT id FROM lessons WHERE group_guid = :group_guid AND day BETWEEN :from_day AND :to_day
+)
+ORDER BY t.teacher_name ASC;

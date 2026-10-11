@@ -2,113 +2,74 @@ package rea.ohyeahworld.plesson.api
 
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
-import kotlinx.datetime.DateTimeUnit
-import kotlinx.datetime.LocalDate
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.isoDayNumber
-import kotlinx.datetime.minus
-import kotlinx.datetime.number
-import kotlinx.datetime.plus
-import kotlinx.datetime.toLocalDateTime
-import kotlinx.datetime.todayIn
-import rea.ohyeahworld.plesson.api.entity.Day
 import rea.ohyeahworld.plesson.api.entity.Group
-import rea.ohyeahworld.plesson.api.entity.Lesson
-import kotlin.time.Clock
+import rea.ohyeahworld.plesson.api.entity.Teacher
+import rea.ohyeahworld.plesson.api.entity.WeekLesson
 
+/**
+ * Сетевой слой (Data Source). Тема 3.1: API-клиент для внешнего PostgREST API pleh.tech.
+ * Единственная задача — получить "сырые" данные; сохранением в SQLite занимается SyncManager.
+ */
 expect fun createHttpClient(): HttpClient
 
 class RestClient {
-    val GROUPS_URL = "https://pleh.tech/rest/v1/groups_current";
-    val SCHEDULE_URL = "https://pleh.tech/rest/v1/lessons_public"
-    val TOKEN =
+    private val GROUPS_URL = "https://pleh.tech/rest/v1/groups_current"
+    private val TEACHERS_URL = "https://pleh.tech/rest/v1/teachers_current"
+    private val WEEK_RPC_URL = "https://pleh.tech/rest/v1/rpc/group_week"
+    private val TOKEN =
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgxNDM2NjY5LCJleHAiOjIwOTY3OTY2Njl9.uVBH4rCUVsarTmNqhiKBw8kvLqKygVvs31fkWW0C6u0"
 
-    val client = createHttpClient()
+    private val client = createHttpClient()
 
-    suspend fun getGroups(): List<Group> {
-        return client.get(GROUPS_URL) {
-            bearerAuth(TOKEN)                       // Authorization: Bearer <token>
-            header("apiKey", TOKEN)                 // apiKey: <token>
-            header("Accept-Profile", "api")         // схема PostgREST
-            parameter("order", "group_name.asc")
-            parameter("select", "group_guid,group_name,faculty,program_type,course")
-        }.body()
-    }
+    /** Список всех групп (справочник). */
+    suspend fun getGroups(): List<Group> = client.get(GROUPS_URL) {
+        authAndProfile()
+        parameter("select", "group_guid,group_name,faculty,program_type,course")
+        parameter("order", "group_name.asc")
+    }.body()
 
-    suspend fun getGroups(name: String): List<Group> {
-        return client.get(GROUPS_URL) {
-            bearerAuth(TOKEN)                       // Authorization: Bearer <token>
-            header("apiKey", TOKEN)                 // apiKey: <token>
-            header("Accept-Profile", "api")         // схема PostgREST
-            parameter("order", "group_name.asc")
-            parameter("select", "group_guid,group_name,faculty,program_type,course")
-            parameter("group_name", "ilike.*$name*")
-        }.body()
-    }
+    /** Поиск групп по подстроке названия (на стороне сервера). */
+    suspend fun getGroups(name: String): List<Group> = client.get(GROUPS_URL) {
+        authAndProfile()
+        parameter("select", "group_guid,group_name,faculty,program_type,course")
+        parameter("order", "group_name.asc")
+        parameter("group_name", "ilike.*${name.filterNot { it == '%' }}*")
+    }.body()
 
-    suspend fun getLessonsByGroupGuid(group_guid: String) : List<Lesson> {
-        var today = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+    /** Преподаватели и их кафедры. */
+    suspend fun getTeachers(): List<Teacher> = client.get(TEACHERS_URL) {
+        authAndProfile()
+        parameter("select", "teacher_slug,teacher_name,departments")
+        parameter("order", "teacher_name.asc")
+    }.body()
 
-        // Вычисляем начало семестра (1 сентября текущего или прошлого года)
-        val year = if (today.month.number in 8..12) today.year else today.year - 1
-        val gte = "gte.${year}-09-01"
-
-        val lte = "lte." + if (today.month.number in 6..12) "${today.year}-12-31" else "${today.year}-08-01"
-
-        val response = client.get(SCHEDULE_URL) {
-            bearerAuth(TOKEN)
-            header("apiKey", TOKEN)
-            header("Accept-Profile", "api")
-            parameter("group_guid", "eq.$group_guid")
-
-            // Используем корректный gte от начала семестра
-            url.parameters.append("day", gte)
-            url.parameters.append("day", lte)
-
+    /**
+     * Расписание группы на неделю через RPC group_week (Пн–Сб заданной недели).
+     * @param monday ISO-дата понедельника нужной недели
+     * @param sunday ISO-дата воскресенья этой же недели
+     */
+    suspend fun getWeekSchedule(groupGuid: String, monday: String, sunday: String): List<WeekLesson> =
+        client.get(WEEK_RPC_URL) {
+            authAndProfile()
+            parameter("p_group_guid", groupGuid)
+            parameter("p_from", monday)
+            parameter("p_to", sunday)
             parameter("order", "day.asc,period.asc")
             parameter(
-                "select", "day,period," +
-                        "discipline," +
-                        "workload_type," +
-                        "room," +
-                        "building," +
-                        "campus," +
-                        "teacher_name," +
-                        "instructor_departments"
+                "select",
+                "day,period,discipline,workload_type,room,building,campus," +
+                        "teacher_name,teacher_names,instructor_names,subgroup,approved"
             )
-        }
-        return response.body()
+        }.body()
+
+    private fun HttpRequestBuilder.authAndProfile() {
+        bearerAuth(TOKEN)
+        header("apiKey", TOKEN)
+        header("Accept-Profile", "api")
     }
-
-    private fun getWeekInterval(): Pair<String, String> {
-        var today = Clock.System.todayIn(TimeZone.currentSystemDefault())
-        if (today.month.number in 6..8) {
-            today = LocalDate(today.year, 9, 1)
-        }
-        val dayOfWeekNumber = today.dayOfWeek.isoDayNumber
-
-
-        // Вычитаем и добавляем дни через DateTimeUnit
-        val startOfWeek = today.minus(dayOfWeekNumber - 1, DateTimeUnit.DAY)
-        val endOfWeek = today.plus(7 - dayOfWeekNumber, DateTimeUnit.DAY)
-
-        return Pair(startOfWeek.toString(), endOfWeek.toString())
-    }
-
-    suspend fun getWeekSchedule(guid: String): List<Day> {
-        val lessons = getLessonsByGroupGuid(guid)
-        val schedule: List<Day> = lessons.groupBy { it.day }.map { (date, lessonsInDay) ->
-            Day(
-                date,
-                lessonsInDay
-            )
-        }
-        return schedule
-    }
-
 }
