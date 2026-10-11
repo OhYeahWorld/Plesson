@@ -1,6 +1,6 @@
 package rea.ohyeahworld.plesson.api
 
-import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.isoDayNumber
@@ -57,7 +57,7 @@ fun generateDemoWeek(groupGuid: String, date: LocalDate): List<rea.ohyeahworld.p
 
     for (dayOffset in 0..5) { // Пн–Сб
         val d = monday.plus(dayOffset.toLong(), kotlinx.datetime.DateTimeUnit.DAY)
-        val daySeed = seed + d.dayOfYear * 7 + d.month.number * 13
+        val daySeed = seed + d.dayOfMonth * 7 + d.monthNumber * 13
         val lessonCount = if (d.dayOfWeek == DayOfWeek.SUNDAY) 0 else (daySeed % 4)
         for (i in 0 until lessonCount) {
             val period = i * 2 + 1 + (i % 2) // пары через одну: 1,3,5,7...

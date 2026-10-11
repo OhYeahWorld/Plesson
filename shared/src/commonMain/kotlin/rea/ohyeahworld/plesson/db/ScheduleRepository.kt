@@ -4,22 +4,16 @@ import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.withContext
-import kotlinx.datetime.Clock
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
-import kotlinx.datetime.TimeZone
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.minus
 import kotlinx.datetime.plus
-import kotlinx.datetime.todayIn
-import kotlinx.datetime.Clock
 import rea.ohyeahworld.plesson.PlessonDatabase
+import rea.ohyeahworld.plesson.api.RestClient
 import rea.ohyeahworld.plesson.api.entity.Group
 import rea.ohyeahworld.plesson.api.entity.Lesson
 import rea.ohyeahworld.plesson.api.entity.WeekLesson
-import rea.ohyeahworld.plesson.db.GroupsQueries
-import rea.ohyeahworld.plesson.db.LessonsQueries
-import rea.ohyeahworld.plesson.db.TeachersQueries
 import rea.ohyeahworld.plesson.api.generateDemoWeek
 import rea.ohyeahworld.plesson.api.sanitizeLikeParam
 
@@ -32,9 +26,9 @@ class ScheduleRepository(driver: SqlDriver) {
 
     private val db = PlessonDatabase(driver)
     // SQLDelight генерирует по одному классу запросов на .sq-файл
-    private val groupsQ: GroupsQueries = db.groupsQueries
-    private val lessonsQ: LessonsQueries = db.lessonsQueries
-    private val teachersQ: TeachersQueries = db.teachersQueries
+    private val groupsQ = db.groupsQueries
+    private val lessonsQ = db.lessonsQueries
+    private val teachersQ = db.teachersQueries
 
     /** Понедельник недели, содержащей [date]. */
     fun weekMonday(date: LocalDate): LocalDate =
@@ -91,13 +85,14 @@ class ScheduleRepository(driver: SqlDriver) {
             val from = weekMonday(anyDateOfTheWeek).toString()
             val to = weekSunday(anyDateOfTheWeek).toString()
 
-            // 1) сами занятия
+            // 1) сами занятия (строка сгенерирована из `SELECT l.*, ... AS teacher_name`)
             val rows = lessonsQ.selectByGroupAndRange(groupGuid, from, to).executeAsList()
 
             // 2) все преподаватели каждого занятия (связь M:M через lesson_teachers)
-            val teacherNamesByLesson = teachersQ.teachersForLessons(groupGuid, from, to)
-                .executeAsList()
-                .groupBy({ it.lesson_id }, { it.teacher_name })
+            val teacherNamesByLesson: Map<Long, List<String>> =
+                teachersQ.teachersForLessons(groupGuid, from, to)
+                    .executeAsList()
+                    .groupBy({ row -> row.lesson_id }, { row -> row.teacher_name })
 
             rows.map { row ->
                 Lesson(
@@ -129,7 +124,7 @@ class ScheduleRepository(driver: SqlDriver) {
 
             val remote: List<WeekLesson>? = runCatching {
                 restClient.getWeekSchedule(groupGuid, from, to)
-            }.getOrNull()?.takeIf { it.isNotEmpty() }
+            }.getOrNull()?.takeIf { list: List<WeekLesson> -> list.isNotEmpty() }
 
             val source: List<WeekLesson> = remote ?: generateDemoWeek(groupGuid, anyDateOfTheWeek)
             writeWeek(groupGuid, from, to, source)
@@ -137,8 +132,8 @@ class ScheduleRepository(driver: SqlDriver) {
         }
 
     private fun writeWeek(groupGuid: String, from: String, to: String, items: List<WeekLesson>) {
-        val now = Clock.System.now().toString()
-        db.transactionWithResult {
+        val now = kotlin.time.Clock.System.now().toString()
+        db.transactionWithResult<Unit>(false) {
             teachersQ.unlinkByLessonIds(groupGuid, from, to)
             lessonsQ.deleteByGroupAndRange(groupGuid, from, to)
             for (l in items) {
@@ -157,7 +152,9 @@ class ScheduleRepository(driver: SqlDriver) {
                     approved = if (l.approved) 1L else 0L,
                     synced_at = now,
                 )
-                val lessonId = lessonsQ.lastInsertRowId().asQuery().executeAsOne()
+                // last_insert_rowid() — обычный SELECT, SQLDelight генерирует Query<Long>,
+                // вызывается напрямую (никакого asQuery здесь нет).
+                val lessonId: Long = lessonsQ.lastInsertRowId().executeAsOne()
                 val names = LinkedHashSet<String>()
                 l.teacherName?.let { names.add(it) }
                 names.addAll(l.teacherNames.filterNotNull())
@@ -215,4 +212,3 @@ private fun rea.ohyeahworld.plesson.db.Groups.toEntity(): Group =
         program_type = program_type,
         course = course,
     )
-
