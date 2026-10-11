@@ -1,17 +1,27 @@
 package rea.ohyeahworld.plesson.api.entity
 
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
+/**
+ * Доменная модель занятия — то, что отдаёт Data Access Layer (SQLite) интерфейсу.
+ * id — первичный ключ таблицы lessons (для связки с преподавателями M:M).
+ */
+data class Lesson(
+    val id: Long = 0L,
+    val day: String?,
+    val period: String?,
+    val discipline: String?,
+    val workload_type: String? = null,
+    val room: String? = null,
+    val building: String? = null,
+    val campus: String? = null,
+    val teacher_name: String? = null,
+    /** Все преподаватели занятия (связь M:M через lesson_teachers). */
+    val teacher_names: List<String> = emptyList(),
+    val subgroup: String? = null,
+    val approved: Boolean = true,
+)
 
-@Serializable
-data class Lesson (
-    @SerialName("day") var day: String?,
-    @SerialName("period") var period: String?,
-    @SerialName("discipline") var discipline: String?,
-    @SerialName("workload_type") var workload_type: String?,
-    @SerialName("room") var room: String?,
-    @SerialName("building") var building: String?,
-    @SerialName("campus") var campus: String?,
-    @SerialName("teacher_name") var teacher_name: String?,
-    @SerialName("instructor_departments") var instructor_departments: List<String?>
+/** День недели с занятиями (агрегация для UI). */
+data class Day(
+    val date: String?,
+    val lessons: List<Lesson>,
 )

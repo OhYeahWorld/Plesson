@@ -1,0 +1,25 @@
+-- CRUD: занятия. Чтение из локальной SQLite — приложение работает офлайн.
+selectByGroupAndRange:
+SELECT l.*, t.teacher_name AS teacher_name
+FROM lessons l
+LEFT JOIN lesson_teachers lt ON lt.lesson_id = l.id
+LEFT JOIN teachers t ON t.teacher_slug = lt.teacher_slug
+WHERE l.group_guid = :group_guid AND l.day BETWEEN :from_day AND :to_day
+ORDER BY l.day ASC, l.period ASC, t.teacher_name ASC;
+
+deleteByGroupAndRange:
+DELETE FROM lessons
+WHERE group_guid = :group_guid AND day BETWEEN :from_day AND :to_day;
+
+insertLesson:
+INSERT INTO lessons(
+    group_guid, day, period, discipline, workload_type,
+    room, building, campus, subgroup, approved, synced_at
+)
+VALUES(
+    :group_guid, :day, :period, :discipline, :workload_type,
+    :room, :building, :campus, :subgroup, :approved, :synced_at
+);
+
+lastInsertRowId:
+SELECT last_insert_rowid();

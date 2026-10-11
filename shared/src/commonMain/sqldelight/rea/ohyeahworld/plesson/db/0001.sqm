@@ -1,0 +1,54 @@
+-- ============================================================================
+-- Физическая модель БД (SQLite). Тема 3.1 курса ПП_РП_Среда_СУБД.
+-- Нормализация: 3-я нормальная форма, внешние ключи, индексы для поиска.
+-- Связи: groups 1:M lessons, teachers M:M lessons (через lesson_teachers).
+-- ============================================================================
+
+CREATE TABLE groups (
+    group_guid   TEXT PRIMARY KEY NOT NULL,
+    group_name   TEXT NOT NULL,
+    faculty      TEXT,
+    program_type TEXT,
+    course       TEXT
+);
+
+CREATE TABLE teachers (
+    teacher_slug TEXT PRIMARY KEY NOT NULL,
+    teacher_name TEXT NOT NULL
+);
+
+CREATE TABLE teacher_departments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug       TEXT NOT NULL REFERENCES teachers(teacher_slug) ON DELETE CASCADE,
+    department TEXT NOT NULL
+);
+
+CREATE TABLE lessons (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_guid    TEXT NOT NULL REFERENCES groups(group_guid) ON DELETE CASCADE,
+    day           TEXT NOT NULL,               -- ISO-дата занятия: YYYY-MM-DD
+    period        INTEGER NOT NULL,            -- номер пары (1..8)
+    discipline    TEXT NOT NULL,
+    workload_type TEXT,                        -- Лекция / Практика / Лаборатория...
+    room          TEXT,
+    building      TEXT,
+    campus        TEXT,
+    subgroup      TEXT,
+    approved      INTEGER NOT NULL DEFAULT 1,
+    synced_at     TEXT NOT NULL                -- когда запись была загружена из API
+);
+
+-- M:M: занятие ведёт один или несколько преподавателей
+CREATE TABLE lesson_teachers (
+    lesson_id    INTEGER NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+    teacher_slug TEXT NOT NULL REFERENCES teachers(teacher_slug) ON DELETE CASCADE,
+    PRIMARY KEY (lesson_id, teacher_slug)
+);
+
+-- Индексы (ускорение типовых выборок)
+CREATE INDEX idx_lessons_group_day ON lessons(group_guid, day);
+CREATE INDEX idx_lessons_day       ON lessons(day);
+CREATE INDEX idx_groups_name       ON groups(group_name);
+CREATE INDEX idx_teachers_name     ON teachers(teacher_name);
+CREATE INDEX idx_dept_slug         ON teacher_departments(slug);
+CREATE INDEX idx_lt_teacher        ON lesson_teachers(teacher_slug);
