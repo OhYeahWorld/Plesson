@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
+import rea.ohyeahworld.plesson.api.entity.ClassPeriod
 import rea.ohyeahworld.plesson.api.entity.Group
 import rea.ohyeahworld.plesson.api.entity.Teacher
 import rea.ohyeahworld.plesson.api.entity.WeekLesson
@@ -18,6 +19,7 @@ class RestClient {
     private val groupsUrl = "https://pleh.tech/rest/v1/groups_current"
     private val teachersUrl = "https://pleh.tech/rest/v1/teachers_current"
     private val weekRpcUrl = "https://pleh.tech/rest/v1/rpc/group_week"
+    private val classPeriodsUrl = "https://pleh.tech/rest/v1/class_periods"
 
     private val client = createHttpClient()
 
@@ -38,6 +40,11 @@ class RestClient {
     suspend fun getTeachers(): List<Teacher> = client.get(teachersUrl) {
         parameter("select", "teacher_slug,teacher_name,departments")
         parameter("order", "teacher_name.asc")
+    }.body()
+
+    /** Справочник реального времени пар (период N -> начало/конец). */
+    suspend fun getClassPeriods(): List<ClassPeriod> = client.get(classPeriodsUrl) {
+        parameter("order", "period_number.asc")
     }.body()
 
     /**

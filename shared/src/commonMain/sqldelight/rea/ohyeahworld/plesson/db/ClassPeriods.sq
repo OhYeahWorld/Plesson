@@ -1,0 +1,7 @@
+-- CRUD: справочник времени пар
+upsertPeriod:
+INSERT OR REPLACE INTO class_periods(period_number, start_time, end_time, synced_at)
+VALUES(:period_number, :start_time, :end_time, :synced_at);
+
+selectAllPeriods:
+SELECT * FROM class_periods ORDER BY period_number ASC;

@@ -19,8 +19,12 @@ data class DayUi(
 fun mondayOf(date: LocalDate): LocalDate =
     date.minus(DatePeriod(days = date.dayOfWeek.isoDayNumber - 1))
 
+/** "HH:mm:ss" -> "HH:mm". */
+fun shortTime(t: String?): String? = t?.split(":")?.takeIf { it.size >= 2 }?.joinToString(":") { p -> p.take(2) }
+
 /**
  * Дни выбранной недели: Пн–Сб всегда (пустые тоже показываем), Вс — только если там есть занятия.
+ * Внутри дня занятия упорядочены по реальному времени начала; при его отсутствии — по номеру пары.
  */
 fun buildDaysUi(
     weekStart: LocalDate,
@@ -29,6 +33,9 @@ fun buildDaysUi(
 ): List<DayUi> {
     val names = mapOf(1 to "Пн", 2 to "Вт", 3 to "Ср", 4 to "Чт", 5 to "Пт", 6 to "Сб", 7 to "Вс")
     val byDate = lessons.groupBy { it.day }
+        .mapValues { (_, ls) ->
+            ls.sortedWith(compareBy({ it.startTime ?: "~" }, { it.period?.toIntOrNull() ?: Int.MAX_VALUE }))
+        }
     val result = mutableListOf<DayUi>()
     var d = weekStart
     repeat(6) { // Пн–Сб
