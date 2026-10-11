@@ -14,10 +14,11 @@ actual fun createSqlDriver(): SqlDriver {
     dir.mkdirs()
     val dbFile = File(dir, "plesson.db")
     val url = "jdbc:sqlite:${dbFile.absolutePath}"
-    // Если файла нет (или он пуст) — создаём схему, иначе просто открываем.
-    return if (dbFile.length() == 0L) {
-        JdbcSqliteDriver(url).also { PlessonDatabase.Schema.create(it) }
-    } else {
-        JdbcSqliteDriver(url)
+    // Всегда открываем драйвер и вызываем create(): SQLDelight сам определит
+    // версию файла — для новой БД создаст полную схему, для существующей
+    // прогонит недостающие миграции (.sqm). Это чинит старые файлы,
+    // в которых нет новых таблиц (например, class_periods).
+    return JdbcSqliteDriver(url).also { driver ->
+        runCatching { PlessonDatabase.Schema.create(driver) }
     }
 }
