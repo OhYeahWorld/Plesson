@@ -38,7 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.minus
@@ -184,13 +184,13 @@ fun App() {
                 }
                 Spacer(Modifier.weight(1f))
                 OutlinedButton(
-                    onClick = { weekStart = weekStart.minus(7L, DateTimeUnit.DAY) },
+                    onClick = { weekStart = weekStart.minus(DatePeriod(days = 7)) },
                     enabled = weekStart > firstWeek,
                 ) {
                     Text("<")
                 }
                 OutlinedButton(
-                    onClick = { weekStart = weekStart.plus(7L, DateTimeUnit.DAY) },
+                    onClick = { weekStart = weekStart.plus(DatePeriod(days = 7)) },
                     enabled = weekStart < lastWeek,
                 ) {
                     Text(">")
@@ -355,7 +355,7 @@ fun App() {
 // ---------------------------------------------------------------- helpers
 
 private fun weekRangeText(monday: LocalDate): String {
-    val saturday = monday.plus(5L, DateTimeUnit.DAY)
+    val saturday = monday.plus(DatePeriod(days = 5))
     return "${prettyDate(monday.toString())} - ${prettyDate(saturday.toString())}"
 }
 

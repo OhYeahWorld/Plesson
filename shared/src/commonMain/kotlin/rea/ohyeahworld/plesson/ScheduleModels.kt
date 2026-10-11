@@ -1,9 +1,10 @@
 package rea.ohyeahworld.plesson
 
-import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.minus
+import kotlinx.datetime.plus
 import rea.ohyeahworld.plesson.api.entity.Lesson
 
 /** UI-модель дня для оптимизации перерисовок. */
@@ -16,7 +17,7 @@ data class DayUi(
 
 /** Понедельник недели, содержащей [date]. */
 fun mondayOf(date: LocalDate): LocalDate =
-    date.minus((date.dayOfWeek.isoDayNumber - 1).toLong(), DateTimeUnit.DAY)
+    date.minus(DatePeriod(days = date.dayOfWeek.isoDayNumber - 1))
 
 /**
  * Дни выбранной недели: Пн–Сб всегда (пустые тоже показываем), Вс — только если там есть занятия.
@@ -38,7 +39,7 @@ fun buildDaysUi(
             isToday = iso == todayStr,
             lessons = byDate[iso] ?: emptyList(),
         )
-        d = d.plus(1L, DateTimeUnit.DAY)
+        d = d.plus(DatePeriod(days = 1))
     }
     // Воскресенье показываем только если там есть занятия
     val sundayLessons = byDate[d.toString()] ?: emptyList()
