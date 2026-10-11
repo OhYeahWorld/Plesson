@@ -7,6 +7,15 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinxSerialization)
+    alias(libs.plugins.sqldelight)
+}
+
+sqldelight {
+    databases {
+        create("PlessonDatabase") {
+            packageName.set("rea.ohyeahworld.plesson")
+        }
+    }
 }
 
 kotlin {
@@ -57,6 +66,7 @@ kotlin {
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.compose.uiTooling)
             implementation(libs.ktor.client.okhttp)
+            implementation(libs.sqldelight.android.driver)
         }
 
         commonMain.dependencies {
@@ -68,21 +78,24 @@ kotlin {
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
-            implementation(libs.ktor.client.cio)
+            implementation(libs.ktor.client.js)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
             implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
+            implementation(libs.sqldelight.runtime)
             // УБРАЛИ logback отсюда!
         }
 
         // Добавляем logback ТОЛЬКО для JVM
         jvmMain.dependencies {
             implementation("ch.qos.logback:logback-classic:1.5.16")
+            implementation(libs.sqldelight.jvm.driver)
         }
 
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
+            implementation(libs.sqldelight.native.driver)
         }
 
         commonTest.dependencies {
