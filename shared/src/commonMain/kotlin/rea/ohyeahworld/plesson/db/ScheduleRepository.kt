@@ -1,5 +1,6 @@
 package rea.ohyeahworld.plesson.db
 
+import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.withContext
@@ -24,8 +25,9 @@ import rea.ohyeahworld.plesson.api.sanitizeLikeParam
  * Синхронизация наполняет её из внешнего API pleh.tech; при отсутствии сети
  * используется детерминированный демо-набор, чтобы приложение всегда что-то показывало.
  */
-class ScheduleRepository(private val db: PlessonDatabase) {
+class ScheduleRepository(driver: SqlDriver) {
 
+    private val db = PlessonDatabase(driver)
     private val queries = db.plessonQueries
 
     /** Понедельник недели, содержащей [date]. */
@@ -181,9 +183,13 @@ class ScheduleRepository(private val db: PlessonDatabase) {
         teachers.size
     }
 
-    /** Кафедры преподавателя по ФИО (для раскрытия деталей занятия). */
+    /** Кафедры преподавателя по ФИО (для раскрытия деталей занятия). Синхронизирует справочник при пустой БД. */
     suspend fun departmentsForTeacher(name: String): List<String> = withContext(Dispatchers.IO) {
-        queries.departmentsForTeacher(slugify(name)).executeAsList().map { it.department }
+        val slug = slugify(name)
+        val cached = queries.departmentsForTeacher(slug).executeAsList().map { it.department }
+        if (cached.isNotEmpty()) return@withContext cached
+        syncTeachers()
+        queries.departmentsForTeacher(slug).executeAsList().map { it.department }
     }
 
     companion object {

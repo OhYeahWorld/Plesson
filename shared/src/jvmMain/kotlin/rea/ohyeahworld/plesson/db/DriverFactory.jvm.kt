@@ -13,9 +13,11 @@ actual fun createSqlDriver(): SqlDriver {
     val dir = File(System.getProperty("user.home"), ".plesson")
     dir.mkdirs()
     val dbFile = File(dir, "plesson.db")
-    val driver = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}")
-    if (!PlessonDatabase.Schema.validate(driver)) {
-        PlessonDatabase.Schema.create(driver)
+    val url = "jdbc:sqlite:${dbFile.absolutePath}"
+    // Если файла нет (или он пуст) — создаём схему, иначе просто открываем.
+    return if (dbFile.length() == 0L) {
+        JdbcSqliteDriver(url).also { PlessonDatabase.Schema.create(it) }
+    } else {
+        JdbcSqliteDriver(url)
     }
-    return driver
 }
