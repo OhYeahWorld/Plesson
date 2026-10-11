@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeContentPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -33,7 +32,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -43,24 +41,16 @@ import kotlinx.coroutines.launch
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
-import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 import kotlinx.datetime.todayIn
+import rea.ohyeahworld.plesson.api.Semester
 import rea.ohyeahworld.plesson.api.entity.Group
 import rea.ohyeahworld.plesson.api.entity.Lesson
 import rea.ohyeahworld.plesson.color.MyScheduleTheme
 import rea.ohyeahworld.plesson.db.ScheduleRepository
 import rea.ohyeahworld.plesson.db.createSqlDriver
 import kotlin.time.Clock
-
-/** UI-модель дня для оптимизации перерисовок. */
-data class DayUi(
-    val date: String,
-    val dayOfWeekText: String,
-    val isToday: Boolean,
-    val lessons: List<Lesson>,
-)
 
 /**
  * Единственный источник данных приложения — локальная база SQLite (SQLDelight).
@@ -86,15 +76,20 @@ private const val DEFAULT_GROUP_NAME = "15.27Д-ИВТ01/23б"
 fun App() {
     val repo = remember { AppDatabase.ensure() }
 
-    val keyboardController = LocalSoftwareKeyboardController.current
     val coroutineScope = rememberCoroutineScope()
 
     var groupGuid by remember { mutableStateOf(DEFAULT_GROUP_GUID) }
     var currentGroup by remember { mutableStateOf(DEFAULT_GROUP_NAME) }
 
-    // Текущая просматриваемая неделя — её понедельник
     val todayDate = remember { Clock.System.todayIn(TimeZone.currentSystemDefault()) }
-    var weekStart by remember { mutableStateOf(mondayOf(todayDate)) }
+    val semesterBounds = remember(todayDate) { Semester.bounds(todayDate) }
+    val firstWeek = mondayOf(semesterBounds.first)
+    val lastWeek = mondayOf(semesterBounds.second)
+
+    // Текущая просматриваемая неделя — её понедельник (в границах семестра)
+    var weekStart by remember(groupGuid) {
+        mutableStateOf(mondayOf(todayDate).coerceIn(firstWeek, lastWeek))
+    }
 
     var daysUi by remember { mutableStateOf<List<DayUi>>(emptyList()) }
     var groups by remember { mutableStateOf<List<Group>>(emptyList()) }
@@ -115,8 +110,9 @@ fun App() {
         try {
             isLoading = true
             if (syncFirst) {
-                val online = repo.syncWeek(groupGuid, date)
-                offlineMode = !online
+                val cached = repo.hasLessons(groupGuid)
+                val online = repo.syncSemester(groupGuid, todayDate)
+                offlineMode = !online && !cached
             }
             val lessons = repo.lessonsForWeek(groupGuid, date)
             daysUi = buildDaysUi(date, lessons, todayStr)
@@ -128,10 +124,19 @@ fun App() {
         }
     }
 
-    LaunchedEffect(groupGuid, weekStart) {
+    LaunchedEffect(groupGuid) {
         loadWeek(weekStart, syncFirst = true)
         if (repo != null && groups.isEmpty()) {
             runCatching { repo.loadGroups() }.getOrNull()?.let { groups = it }
+        }
+    }
+
+    // Переключение недель внутри семестра — только чтение из SQLite, без сети
+    LaunchedEffect(weekStart) {
+        if (!isLoading && daysUi.isNotEmpty() && repo != null) {
+            runCatching { repo.lessonsForWeek(groupGuid, weekStart) }
+                .getOrNull()
+                ?.let { daysUi = buildDaysUi(weekStart, it, todayStr) }
         }
     }
 
@@ -178,19 +183,30 @@ fun App() {
                     Text(text = currentGroup, maxLines = 1)
                 }
                 Spacer(Modifier.weight(1f))
-                // ← назад на неделю
-                OutlinedButton(onClick = { weekStart = weekStart.minus(7L, DateTimeUnit.DAY) }) {
-                    Text("←")
+                OutlinedButton(
+                    onClick = { weekStart = weekStart.minus(7L, DateTimeUnit.DAY) },
+                    enabled = weekStart > firstWeek,
+                ) {
+                    Text("<")
                 }
-                // → вперёд на неделю (после субботы открывается следующая неделя)
-                OutlinedButton(onClick = { weekStart = weekStart.plus(7L, DateTimeUnit.DAY) }) {
-                    Text("→")
+                OutlinedButton(
+                    onClick = { weekStart = weekStart.plus(7L, DateTimeUnit.DAY) },
+                    enabled = weekStart < lastWeek,
+                ) {
+                    Text(">")
                 }
             }
 
+            Text(
+                text = "Семестр ${prettyDate(semesterBounds.first.toString())} - ${prettyDate(semesterBounds.second.toString())}, неделя ${weekRangeText(weekStart)}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+
             if (offlineMode && !isLoading) {
                 Text(
-                    text = "Нет соединения — показаны демо-данные",
+                    text = "Нет соединения с сервером, расписание ещё ни разу не загружалось",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(bottom = 4.dp),
@@ -253,10 +269,10 @@ fun App() {
                                 if (currentDay.lessons.isEmpty()) {
                                     item { EmptyDayView() }
                                 } else {
-                                    items(
+                                    itemsIndexed(
                                         currentDay.lessons,
-                                        key = { "d${currentDay.date}-${it.id}-${it.period}-${it.subgroup}" },
-                                    ) { lesson ->
+                                        key = { i, lesson -> "${currentDay.date}-$i-${lesson.period}-${lesson.subgroup}" },
+                                    ) { _, lesson ->
                                         LessonCard(lesson = lesson, departmentsFor = repo)
                                     }
                                 }
@@ -282,7 +298,7 @@ fun App() {
                         label = { Text("Найти группу") },
                         placeholder = { Text("Например: 15.27Д-ИВТ01/23б") },
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { keyboardController?.hide() }),
+                        keyboardActions = KeyboardActions(onSearch = { }),
                     )
                     val filteredList = remember(fieldText, groups) {
                         if (fieldText.isBlank()) groups
@@ -300,7 +316,7 @@ fun App() {
                             .fillMaxWidth()
                             .weight(1f, fill = false),
                     ) {
-                        items(filteredList.take(100)) { group ->
+                        itemsIndexed(filteredList.take(100)) { _, group ->
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -310,7 +326,6 @@ fun App() {
                                             currentGroup = group.group_name.orEmpty()
                                         }
                                         showGroupPicker = false
-                                        keyboardController?.hide()
                                     }
                                     .padding(horizontal = 16.dp, vertical = 10.dp),
                             ) {
@@ -339,8 +354,10 @@ fun App() {
 
 // ---------------------------------------------------------------- helpers
 
-private fun mondayOf(date: LocalDate): LocalDate =
-    date.minus((date.dayOfWeek.isoDayNumber - 1).toLong(), DateTimeUnit.DAY)
+private fun weekRangeText(monday: LocalDate): String {
+    val saturday = monday.plus(5L, DateTimeUnit.DAY)
+    return "${prettyDate(monday.toString())} - ${prettyDate(saturday.toString())}"
+}
 
 private fun prettyDate(iso: String): String {
     val parts = iso.split("-")
@@ -358,46 +375,18 @@ private fun humanError(e: Exception): String {
     }
 }
 
-/** Собирает список дней Пн–Сб выбранной недели (пустые дни тоже показываем). */
-private fun buildDaysUi(
-    weekStart: LocalDate,
-    lessons: List<Lesson>,
-    todayStr: String,
-): List<DayUi> {
-    val names = mapOf(1 to "Пн", 2 to "Вт", 3 to "Ср", 4 to "Чт", 5 to "Пт", 6 to "Сб", 7 to "Вс")
-    val byDate = lessons.groupBy { it.day }
-    val result = mutableListOf<DayUi>()
-    var d = weekStart
-    repeat(6) { // Пн–Сб
-        val iso = d.toString()
-        result += DayUi(
-            date = iso,
-            dayOfWeekText = names[d.dayOfWeek.isoDayNumber] ?: "",
-            isToday = iso == todayStr,
-            lessons = byDate[iso] ?: emptyList(),
-        )
-        d = d.plus(1L, DateTimeUnit.DAY)
-    }
-    // Воскресенье показываем только если там есть занятия
-    val sundayLessons = byDate[d.toString()] ?: emptyList()
-    if (sundayLessons.isNotEmpty()) {
-        result += DayUi(d.toString(), "Вс", d.toString() == todayStr, sundayLessons)
-    }
-    return result
-}
-
 // ---------------------------------------------------------------- UI-компоненты занятия (Тема 2: Master-Detail)
 
-/** Номера пар: период N → временной интервал. */
+/** Номера пар: период N -> временной интервал. */
 private val periodTimes = mapOf(
-    1 to "09:00–10:35",
-    2 to "10:45–12:20",
-    3 to "13:00–14:35",
-    4 to "14:45–16:20",
-    5 to "16:30–18:05",
-    6 to "18:15–19:50",
-    7 to "20:00–21:35",
-    8 to "21:45–23:20",
+    1 to "09:00-10:35",
+    2 to "10:45-12:20",
+    3 to "13:00-14:35",
+    4 to "14:45-16:20",
+    5 to "16:30-18:05",
+    6 to "18:15-19:50",
+    7 to "20:00-21:35",
+    8 to "21:45-23:20",
 )
 
 private fun periodTimeText(periodStr: String?): String? {
@@ -414,11 +403,6 @@ fun EmptyDayView() {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "🎉",
-            style = MaterialTheme.typography.displaySmall,
-        )
-        Spacer(Modifier.padding(top = 8.dp))
-        Text(
             text = "Занятий нет",
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -432,8 +416,8 @@ fun EmptyDayView() {
 }
 
 /**
- * Карточка занятия: под предметом — базовая информация (преподаватель, аудитория),
- * по нажатию — раскрытие дополнительных деталей (кафедры, корпус, тип занятия).
+ * Карточка занятия: по умолчанию видны только номер пары и дисциплина.
+ * По нажатию раскрывается информация о занятии и преподавателе (кафедры читаются из SQLite).
  */
 @Composable
 fun LessonCard(
@@ -444,6 +428,9 @@ fun LessonCard(
     var expanded by remember { mutableStateOf(false) }
     var departments by remember { mutableStateOf<List<String>?>(null) }
     val coroutineScope = rememberCoroutineScope()
+
+    val teacherLine = lesson.teacher_names.ifEmpty { listOfNotNull(lesson.teacher_name) }
+        .distinct().joinToString(", ")
 
     Column(
         modifier = modifier
@@ -478,31 +465,25 @@ fun LessonCard(
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = lesson.discipline ?: "—",
+                    text = lesson.discipline ?: "-",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
-                // ---------- Базовая информация всегда видна под предметом
-                val baseInfo = listOfNotNull(
-                    lesson.workload_type,
-                    periodTimeText(lesson.period)?.let { "⏰ $it" },
-                ).joinToString(" · ")
-                if (baseInfo.isNotEmpty()) {
-                    Text(
-                        text = baseInfo,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                val teacherLine = lesson.teacher_names.ifEmpty { listOfNotNull(lesson.teacher_name) }
-                    .distinct().joinToString(", ")
+            }
+            Text(
+                text = if (expanded) "^" else "v",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+
+        // ---------- Информация о преподавателе и деталях — только по нажатию
+        AnimatedVisibility(visible = expanded) {
+            Column(modifier = Modifier.padding(top = 10.dp)) {
+                periodTimeText(lesson.period)?.let { DetailRow("Время", it) }
+                lesson.workload_type?.let { DetailRow("Тип", it) }
                 if (teacherLine.isNotEmpty()) {
-                    Text(
-                        text = teacherLine,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Medium,
-                    )
+                    DetailRow("Преподаватель", teacherLine)
                 }
                 val roomLine = listOfNotNull(
                     lesson.room?.let { "Ауд. $it" },
@@ -510,29 +491,14 @@ fun LessonCard(
                     lesson.subgroup?.let { "Подгруппа $it" },
                 ).joinToString(" · ")
                 if (roomLine.isNotEmpty()) {
-                    Text(
-                        text = roomLine,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    DetailRow("Место", roomLine)
                 }
-            }
-            Text(
-                text = if (expanded) "▲" else "▼",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-
-        // ---------- Дополнительная информация по нажатию
-        AnimatedVisibility(visible = expanded) {
-            Column(modifier = Modifier.padding(top = 10.dp)) {
                 if (lesson.campus != null) {
                     DetailRow("Кампус", lesson.campus)
                 }
                 if (!lesson.approved) {
                     Text(
-                        text = "⚠ Занятие ещё не подтверждено",
+                        text = "Занятие ещё не подтверждено",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -540,7 +506,7 @@ fun LessonCard(
                 when {
                     departments == null -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         CircularProgressIndicator(modifier = Modifier.padding(4.dp), strokeWidth = 2.dp)
-                        Text("Загружаем кафедры…", style = MaterialTheme.typography.labelMedium)
+                        Text("Загружаем кафедры...", style = MaterialTheme.typography.labelMedium)
                     }
                     departments!!.isNotEmpty() -> departments!!.forEach { dep ->
                         DetailRow("Кафедра", dep)
@@ -603,7 +569,7 @@ fun DayChip(
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = if (day.isToday) "${day.dayOfWeekText} •" else day.dayOfWeekText,
+                text = if (day.isToday) "${day.dayOfWeekText} *" else day.dayOfWeekText,
                 color = contentColor,
                 fontWeight = if (isSelected || day.isToday) FontWeight.Bold else FontWeight.Normal,
                 style = MaterialTheme.typography.bodyMedium,
