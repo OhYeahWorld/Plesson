@@ -18,6 +18,9 @@ data class Lesson(
     val teacher_names: List<String> = emptyList(),
     val subgroup: String? = null,
     val approved: Boolean = true,
+    /** Реальное время начала/конца пары из справочника class_periods ("HH:mm"). */
+    val startTime: String? = null,
+    val endTime: String? = null,
 )
 
 /** День недели с занятиями (агрегация для UI). */

@@ -23,6 +23,14 @@ data class WeekLesson(
     @SerialName("approved") val approved: Boolean = true,
 )
 
+/** Ответ /rest/v1/class_periods — реальное время пары по её номеру. */
+@Serializable
+data class ClassPeriod(
+    @SerialName("period_number") val periodNumber: Int = 0,
+    @SerialName("start_time") val startTime: String? = null,
+    @SerialName("end_time") val endTime: String? = null,
+)
+
 /** Ответ /rest/v1/teachers_current — преподаватель и его кафедры. */
 @Serializable
 data class Teacher(

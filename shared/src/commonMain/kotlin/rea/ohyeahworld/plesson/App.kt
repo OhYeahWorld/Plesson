@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeContentPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -99,35 +100,50 @@ fun App() {
 
     val todayStr = remember(todayDate) { todayDate.toString() }
 
-    /** Загрузка недели: сначала читаем SQLite, затем синхронизируем с API и перечитываем. */
-    suspend fun loadWeek(date: LocalDate, syncFirst: Boolean) {
-        if (repo == null) {
-            errorText = "База данных недоступна на этой платформе"
-            isLoading = false
-            return
+    /**
+     * Загрузка расписания семестра. При пустой БД и недоступной сети используется
+     * локальный офлайн-кэш последнего успешного ответа API (тема 3.4: graceful degradation).
+     */
+    suspend fun ensureData() {
+        val r = repo ?: return
+        val cached = r.hasLessons(groupGuid)
+        val online = r.syncSemester(groupGuid, todayDate)
+        offlineMode = !online
+        if (!cached && !online) {
+            // Сеть недоступна, а БД пуста — поднимаем последний сохранённый снимок семестра
+            r.cachedSchedule(groupGuid)?.let { r.restoreFromSnapshot(groupGuid, it, todayDate) }
         }
-        errorText = null
+    }
+
+    /** Чтение недели из SQLite и сборка UI-модели. */
+    suspend fun refreshWeek(date: LocalDate) {
+        val r = repo ?: return
         try {
-            isLoading = true
-            if (syncFirst) {
-                val cached = repo.hasLessons(groupGuid)
-                val online = repo.syncSemester(groupGuid, todayDate)
-                offlineMode = !online && !cached
-            }
-            val lessons = repo.lessonsForWeek(groupGuid, date)
+            val lessons = r.lessonsForWeek(groupGuid, date)
             daysUi = buildDaysUi(date, lessons, todayStr)
         } catch (e: Exception) {
             // Тема 3.3: единый обработчик ошибок — показываем осмысленное сообщение
             errorText = humanError(e)
-        } finally {
-            isLoading = false
         }
     }
 
     LaunchedEffect(groupGuid) {
-        loadWeek(weekStart, syncFirst = true)
-        if (repo != null && groups.isEmpty()) {
-            runCatching { repo.loadGroups() }.getOrNull()?.let { groups = it }
+        if (repo == null) {
+            errorText = "База данных недоступна на этой платформе"
+            isLoading = false
+            return@LaunchedEffect
+        }
+        errorText = null
+        isLoading = true
+        ensureData()
+        refreshWeek(weekStart)
+        isLoading = false
+        if (groups.isEmpty()) {
+            runCatching { repo!!.loadGroups() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { groups = it }
+        }
+        if (groups.isEmpty()) {
+            // Сети нет и справочник пуст — восстанавливаем список групп из офлайн-кэша
+            runCatching { repo!!.restoreGroupsFromCache() }.getOrNull()?.let { groups = it }
         }
     }
 
@@ -224,7 +240,15 @@ fun App() {
                     Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(errorText.orEmpty(), color = MaterialTheme.colorScheme.error)
-                            Button(onClick = { coroutineScope.launch { loadWeek(weekStart, true) } }) {
+                            Button(onClick = {
+                                coroutineScope.launch {
+                                    isLoading = true
+                                    errorText = null
+                                    ensureData()
+                                    refreshWeek(weekStart)
+                                    isLoading = false
+                                }
+                            }) {
                                 Text("Повторить")
                             }
                         }
@@ -291,9 +315,24 @@ fun App() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     var fieldText by remember { mutableStateOf("") }
+                    var searching by remember { mutableStateOf(false) }
                     OutlinedTextField(
                         value = fieldText,
-                        onValueChange = { fieldText = it },
+                        onValueChange = { text ->
+                            fieldText = text
+                            coroutineScope.launch {
+                                searching = true
+                                val r = repo
+                                if (r != null && text.isNotBlank()) {
+                                    runCatching { r.searchGroupsRemote(text) }
+                                        .getOrNull()?.takeIf { it.isNotEmpty() }?.let { groups = it }
+                                } else if (text.isBlank() && r != null) {
+                                    runCatching { r.loadGroups() }.getOrNull()?.takeIf { it.isNotEmpty() }
+                                        ?.let { groups = it }
+                                }
+                                searching = false
+                            }
+                        },
                         singleLine = true,
                         label = { Text("Найти группу") },
                         placeholder = { Text("Например: 15.27Д-ИВТ01/23б") },
@@ -324,6 +363,8 @@ fun App() {
                                         group.group_guid?.let { guid ->
                                             groupGuid = guid
                                             currentGroup = group.group_name.orEmpty()
+                                            // Расписание новой группы скачивается на весь семестр один раз
+                                            coroutineScope.launch { repo?.syncSemester(guid, todayDate) }
                                         }
                                         showGroupPicker = false
                                     }
@@ -377,23 +418,6 @@ private fun humanError(e: Exception): String {
 
 // ---------------------------------------------------------------- UI-компоненты занятия (Тема 2: Master-Detail)
 
-/** Номера пар: период N -> временной интервал. */
-private val periodTimes = mapOf(
-    1 to "09:00-10:35",
-    2 to "10:45-12:20",
-    3 to "13:00-14:35",
-    4 to "14:45-16:20",
-    5 to "16:30-18:05",
-    6 to "18:15-19:50",
-    7 to "20:00-21:35",
-    8 to "21:45-23:20",
-)
-
-private fun periodTimeText(periodStr: String?): String? {
-    val p = periodStr?.toIntOrNull() ?: return null
-    return periodTimes[p]
-}
-
 @Composable
 fun EmptyDayView() {
     Column(
@@ -416,8 +440,8 @@ fun EmptyDayView() {
 }
 
 /**
- * Карточка занятия: по умолчанию видны только номер пары и дисциплина.
- * По нажатию раскрывается информация о занятии и преподавателе (кафедры читаются из SQLite).
+ * Карточка занятия: всегда видны номер пары (реальный, по времени начала), время, дисциплина,
+ * тип занятия и корпус/аудитория. По нажатию раскрывается информация о преподавателе (кафедры — из SQLite).
  */
 @Composable
 fun LessonCard(
@@ -431,6 +455,12 @@ fun LessonCard(
 
     val teacherLine = lesson.teacher_names.ifEmpty { listOfNotNull(lesson.teacher_name) }
         .distinct().joinToString(", ")
+
+    val timeLine = listOfNotNull(lesson.startTime, lesson.endTime).joinToString(" - ")
+    val placeLine = listOfNotNull(
+        lesson.campus?.let { "Корпус $it" },
+        lesson.room?.let { "Ауд. $it" },
+    ).joinToString(", ")
 
     Column(
         modifier = modifier
@@ -449,13 +479,14 @@ fun LessonCard(
             }
             .padding(14.dp),
     ) {
-        // ---------- Заголовок: номер пары + дисциплина
+        // ---------- Заголовок: номер пары + время + дисциплина
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Box(
                 modifier = Modifier
+                    .size(34.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.primary)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                    .background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = lesson.period ?: "?",
@@ -464,11 +495,28 @@ fun LessonCard(
                 )
             }
             Column(modifier = Modifier.weight(1f)) {
+                if (timeLine.isNotEmpty()) {
+                    Text(
+                        text = timeLine,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 Text(
                     text = lesson.discipline ?: "-",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
+                val subtitle = listOfNotNull(lesson.workload_type, placeLine.takeIf { it.isNotEmpty() })
+                    .joinToString(" · ")
+                if (subtitle.isNotEmpty()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             Text(
                 text = if (expanded) "^" else "v",
@@ -477,25 +525,14 @@ fun LessonCard(
             )
         }
 
-        // ---------- Информация о преподавателе и деталях — только по нажатию
+        // ---------- Информация о преподавателе — только по нажатию
         AnimatedVisibility(visible = expanded) {
             Column(modifier = Modifier.padding(top = 10.dp)) {
-                periodTimeText(lesson.period)?.let { DetailRow("Время", it) }
-                lesson.workload_type?.let { DetailRow("Тип", it) }
                 if (teacherLine.isNotEmpty()) {
                     DetailRow("Преподаватель", teacherLine)
                 }
-                val roomLine = listOfNotNull(
-                    lesson.room?.let { "Ауд. $it" },
-                    lesson.building,
-                    lesson.subgroup?.let { "Подгруппа $it" },
-                ).joinToString(" · ")
-                if (roomLine.isNotEmpty()) {
-                    DetailRow("Место", roomLine)
-                }
-                if (lesson.campus != null) {
-                    DetailRow("Кампус", lesson.campus)
-                }
+                lesson.building?.let { DetailRow("Здание", it) }
+                lesson.subgroup?.let { DetailRow("Подгруппа", it) }
                 if (!lesson.approved) {
                     Text(
                         text = "Занятие ещё не подтверждено",

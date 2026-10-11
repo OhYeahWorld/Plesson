@@ -1,0 +1,12 @@
+-- Справочник времени пар (источник: GET /rest/v1/class_periods)
+CREATE TABLE class_periods (
+    period_number INTEGER PRIMARY KEY NOT NULL,
+    start_time    TEXT NOT NULL,   -- "HH:mm:ss"
+    end_time      TEXT NOT NULL,   -- "HH:mm:ss"
+    synced_at     TEXT NOT NULL
+);
+
+CREATE TABLE meta (
+    key   TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL
+);
