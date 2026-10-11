@@ -1,0 +1,10 @@
+-- Миграция для существующих БД, созданных до появления справочника class_periods.
+-- Новые базы получают эту таблицу из 0001.sqm (deriveSchemaFromMigrations),
+-- поэтому здесь таблица создаётся только если её ещё нет — миграция безопасна
+-- и идемпотентна для любых старых файлов ~/.plesson/plesson.db.
+CREATE TABLE IF NOT EXISTS class_periods (
+    period_number INTEGER PRIMARY KEY NOT NULL,
+    start_time    TEXT NOT NULL,   -- "HH:mm:ss"
+    end_time      TEXT NOT NULL,   -- "HH:mm:ss"
+    synced_at     TEXT NOT NULL
+);
