@@ -4,7 +4,7 @@ import app.cash.sqldelight.db.SqlDriver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
 import kotlinx.coroutines.withContext
-import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.isoDayNumber
 import kotlinx.datetime.minus
@@ -32,9 +32,9 @@ class ScheduleRepository(driver: SqlDriver) {
 
     /** Понедельник недели, содержащей [date]. */
     fun weekMonday(date: LocalDate): LocalDate =
-        date.minus((date.dayOfWeek.isoDayNumber - 1).toLong(), DateTimeUnit.DAY)
+        date.minus(DatePeriod(days = date.dayOfWeek.isoDayNumber - 1))
 
-    fun weekSunday(date: LocalDate): LocalDate = weekMonday(date).plus(6L, DateTimeUnit.DAY)
+    fun weekSunday(date: LocalDate): LocalDate = weekMonday(date).plus(DatePeriod(days = 6))
 
     // ---------------------------------------------------------------- Groups
 
