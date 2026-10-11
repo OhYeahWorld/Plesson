@@ -12,6 +12,13 @@ DELETE FROM teacher_departments WHERE slug = :slug;
 insertDepartment:
 INSERT INTO teacher_departments(slug, department) VALUES(:slug, :department);
 
+insertDepartmentIfMissing:
+INSERT OR IGNORE INTO teacher_departments(slug, department)
+SELECT :slug, :department
+WHERE NOT EXISTS (
+    SELECT 1 FROM teacher_departments WHERE slug = :slug AND department = :department
+);
+
 departmentsForTeacher:
 SELECT td.department AS department
 FROM teacher_departments td

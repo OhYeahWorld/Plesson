@@ -19,6 +19,7 @@ data class WeekLesson(
     @SerialName("teacher_name") val teacherName: String? = null,
     @SerialName("teacher_names") val teacherNames: List<String> = emptyList(),
     @SerialName("instructor_names") val instructorNames: List<String> = emptyList(),
+    @SerialName("instructor_departments") val instructorDepartments: List<String> = emptyList(),
     @SerialName("subgroup") val subgroup: String? = null,
     @SerialName("approved") val approved: Boolean = true,
 )

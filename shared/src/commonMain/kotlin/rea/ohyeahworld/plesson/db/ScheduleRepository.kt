@@ -124,13 +124,31 @@ class ScheduleRepository(driver: SqlDriver) {
 
     // -------------------------------------------------------------- Lessons
 
+    /**
+     * Реальный номер пары по времени её начала (из справочника class_periods):
+     * если первая за день пара начинается в 11:50 — это третья пара, а не первая.
+     */
+    private fun periodNumberByTime(periods: List<Class_periods>, startTime: String?): Int? {
+        if (startTime.isNullOrBlank()) return null
+        val norm = normalizeTime(startTime)
+        return periods.firstOrNull { normalizeTime(it.start_time) == norm }?.period_number?.toInt()
+    }
+
+    /** "08:30", "08:30:00" или "8:30" -> "08:30" для сравнения времён. */
+    private fun normalizeTime(t: String): String {
+        val parts = t.split(":")
+        val h = parts.getOrElse(0) { "" }.trim().toIntOrNull() ?: return t.trim()
+        val m = parts.getOrElse(1) { "0" }.trim().toIntOrNull() ?: 0
+        return "%02d:%02d".format(h, m)
+    }
+
     /** Расписание на неделю из БД (UI читает только отсюда — работает офлайн). */
     suspend fun lessonsForWeek(groupGuid: String, anyDateOfTheWeek: LocalDate): List<Lesson> =
         withContext(Dispatchers.Default) {
             val from = weekMonday(anyDateOfTheWeek).toString()
             val to = weekSunday(anyDateOfTheWeek).toString()
 
-            // 1) сами занятия (строка сгенерирована из `SELECT l.*, ... AS teacher_name`)
+            // 1) сами занятия + время пары из справочника (JOIN class_periods -> период period_time)
             val rows = lessonsQ.selectByGroupAndRange(groupGuid, from, to).executeAsList()
 
             // 2) все преподаватели каждого занятия (связь M:M через lesson_teachers)
@@ -139,17 +157,20 @@ class ScheduleRepository(driver: SqlDriver) {
                     .executeAsList()
                     .groupBy({ row -> row.lesson_id }, { row -> row.teacher_name })
 
-            // 3) реальное время пар из локального справочника class_periods
+            // 3) полный справочник времени пар для сопоставления номера по началу занятия
             val periods = periodsQ.selectAllPeriods().executeAsList()
-                .associateBy { it.period_number.toInt() }
+            val periodsByNumber = periods.associateBy { it.period_number.toInt() }
 
             rows.map { row ->
-                val period = row.period.toInt()
-                val p = periods[period]
+                val apiPeriod = row.period.toInt()
+                // Номер пары — по реальному времени начала из справочника class_periods;
+                // если время неизвестно — используем номер, который вернул API.
+                val displayPeriod = periodNumberByTime(periods, row.period_time) ?: apiPeriod
+                val p = periodsByNumber[displayPeriod]
                 Lesson(
                     id = row.id,
                     day = row.day,
-                    period = row.period.toString(),
+                    period = displayPeriod.toString(),
                     discipline = row.discipline,
                     workload_type = row.workload_type,
                     room = row.room,
@@ -167,20 +188,36 @@ class ScheduleRepository(driver: SqlDriver) {
 
     /**
      * Синхронизация расписания группы на весь семестр: API → транзакция → SQLite.
-     * Возвращает true, если данные получены из сети и сохранены; false — сеть недоступна
-     * (в этом случае в базе остаётся ранее сохранённое расписание).
+     * RPC group_week принимает интервал не длиннее недели, поэтому семестр загружается
+     * последовательно неделями (Пн–Вс). Возвращает true, если хотя бы первая неделя
+     * получена из сети; дальше приложение работает офлайн с сохранённой базой.
      */
     suspend fun syncSemester(groupGuid: String, today: LocalDate): Boolean =
         withContext(Dispatchers.Default) {
             val (semesterStart, semesterEnd) = Semester.bounds(today)
-            val remote: List<WeekLesson>? = runCatching {
-                restClient.getSchedule(groupGuid, semesterStart.toString(), semesterEnd.toString())
-            }.getOrNull()?.takeIf { it.isNotEmpty() }
+            var firstMonday = weekMonday(semesterStart)
+            val lastMonday = weekMonday(semesterEnd)
 
-            if (remote == null) return@withContext false
-            writeRange(groupGuid, semesterStart.toString(), semesterEnd.toString(), remote)
+            // Проверка связи: первая неделя семестра
+            val firstWeek: List<WeekLesson> = runCatching {
+                restClient.getScheduleWeek(
+                    groupGuid, firstMonday.toString(), firstMonday.plus(DatePeriod(days = 6)).toString()
+                )
+            }.getOrNull() ?: return@withContext false
+
             syncClassPeriods()
-            cacheScheduleSnapshot(groupGuid, remote)
+            val all = mutableListOf<WeekLesson>()
+            var monday = firstMonday
+            while (monday <= lastMonday) {
+                val from = monday.toString()
+                val to = monday.plus(DatePeriod(days = 6)).toString()
+                val weekData = if (monday == firstMonday) firstWeek
+                else runCatching { restClient.getScheduleWeek(groupGuid, from, to) }.getOrNull()
+                if (weekData != null) all += weekData
+                monday = monday.plus(DatePeriod(days = 7))
+            }
+            writeRange(groupGuid, semesterStart.toString(), semesterEnd.toString(), all)
+            cacheScheduleSnapshot(groupGuid, all)
             true
         }
 
@@ -195,7 +232,7 @@ class ScheduleRepository(driver: SqlDriver) {
 
     suspend fun cachedSchedule(groupGuid: String): List<WeekLesson>? =
         withContext(Dispatchers.Default) {
-            val json = metaQ.getMeta(SNAPSHOT_KEY + groupGuid).executeAsOneOrNull()?.value
+            val json = metaQ.getMeta(SNAPSHOT_KEY + groupGuid).executeAsOneOrNull()?.value_
                 ?: return@withContext null
             runCatching {
                 kotlinx.serialization.json.Json.decodeFromString(
@@ -205,7 +242,7 @@ class ScheduleRepository(driver: SqlDriver) {
         }
 
     suspend fun cachedGroupNames(): List<String> = withContext(Dispatchers.Default) {
-        metaQ.getMeta(GROUPS_CACHE_KEY).executeAsOneOrNull()?.value
+        metaQ.getMeta(GROUPS_CACHE_KEY).executeAsOneOrNull()?.value_
             ?.split("\n")?.filter { it.isNotBlank() }
             ?: emptyList()
     }
@@ -251,10 +288,16 @@ class ScheduleRepository(driver: SqlDriver) {
                 l.teacherName?.let { names.add(it) }
                 names.addAll(l.teacherNames.filterNotNull())
                 names.addAll(l.instructorNames.filterNotNull())
+                val lessonDepartments = LinkedHashSet<String>()
+                lessonDepartments.addAll(l.instructorDepartments.filter { it.isNotBlank() })
                 for (name in names) {
                     val slug = slugify(name)
                     teachersQ.upsertTeacher(slug, name)
                     teachersQ.linkLessonTeacher(lessonId, slug)
+                    // Кафедры из ответа расписания добавляются к уже известным (без дублей)
+                    for (d in lessonDepartments) {
+                        teachersQ.insertDepartmentIfMissing(slug, d)
+                    }
                 }
             }
         }
@@ -283,13 +326,9 @@ class ScheduleRepository(driver: SqlDriver) {
         teachers.size
     }
 
-    /** Кафедры преподавателя по ФИО (для раскрытия деталей занятия). Синхронизирует справочник при пустой БД. */
+    /** Кафедры преподавателя по ФИО (для раскрытия деталей занятия). Только чтение из SQLite. */
     suspend fun departmentsForTeacher(name: String): List<String> = withContext(Dispatchers.Default) {
-        val slug = slugify(name)
-        val cached = teachersQ.departmentsForTeacher(slug).executeAsList()
-        if (cached.isNotEmpty()) return@withContext cached
-        syncTeachers()
-        teachersQ.departmentsForTeacher(slug).executeAsList()
+        teachersQ.departmentsForTeacher(slugify(name)).executeAsList()
     }
 
     companion object {

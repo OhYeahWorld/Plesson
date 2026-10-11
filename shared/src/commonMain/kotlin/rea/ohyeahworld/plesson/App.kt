@@ -108,7 +108,11 @@ fun App() {
         val r = repo ?: return
         val cached = r.hasLessons(groupGuid)
         val online = r.syncSemester(groupGuid, todayDate)
-        offlineMode = !online
+        if (online && !cached) {
+            // Первый успешный запуск: сохраняем справочник групп в БД для офлайн-поиска
+            runCatching { r.syncGroups() }
+        }
+        offlineMode = !online && !cached
         if (!cached && !online) {
             // Сеть недоступна, а БД пуста — поднимаем последний сохранённый снимок семестра
             r.cachedSchedule(groupGuid)?.let { r.restoreFromSnapshot(groupGuid, it, todayDate) }
@@ -315,22 +319,21 @@ fun App() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     var fieldText by remember { mutableStateOf("") }
-                    var searching by remember { mutableStateOf(false) }
                     OutlinedTextField(
                         value = fieldText,
                         onValueChange = { text ->
                             fieldText = text
                             coroutineScope.launch {
-                                searching = true
-                                val r = repo
-                                if (r != null && text.isNotBlank()) {
-                                    runCatching { r.searchGroupsRemote(text) }
-                                        .getOrNull()?.takeIf { it.isNotEmpty() }?.let { groups = it }
-                                } else if (text.isBlank() && r != null) {
+                                val r = repo ?: return@launch
+                                if (text.isNotBlank()) {
+                                    // Сначала ищем по сети, при неудаче — по локальной базе
+                                    val remote = runCatching { r.searchGroupsRemote(text) }
+                                        .getOrNull()?.takeIf { it.isNotEmpty() }
+                                    groups = remote ?: r.searchGroups(text)
+                                } else {
                                     runCatching { r.loadGroups() }.getOrNull()?.takeIf { it.isNotEmpty() }
                                         ?.let { groups = it }
                                 }
-                                searching = false
                             }
                         },
                         singleLine = true,

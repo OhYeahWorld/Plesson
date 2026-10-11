@@ -15,6 +15,8 @@ import rea.ohyeahworld.plesson.api.entity.WeekLesson
  */
 expect fun createHttpClient(): HttpClient
 
+private const val PAGE_SIZE = 1000
+
 class RestClient {
     private val groupsUrl = "https://pleh.tech/rest/v1/groups_current"
     private val teachersUrl = "https://pleh.tech/rest/v1/teachers_current"
@@ -23,17 +25,33 @@ class RestClient {
 
     private val client = createHttpClient()
 
-    /** Список всех групп (справочник). */
-    suspend fun getGroups(): List<Group> = client.get(groupsUrl) {
-        parameter("select", "group_guid,group_name,faculty,program_type,course")
-        parameter("order", "group_name.asc")
-    }.body()
+    /**
+     * Список всех групп (справочник). PostgREST отдаёт не более 1000 строк за запрос,
+     * всего групп больше — поэтому читаем страницами по offset до последнего неполного ответа.
+     */
+    suspend fun getGroups(): List<Group> {
+        val result = mutableListOf<Group>()
+        var offset = 0
+        while (true) {
+            val page: List<Group> = client.get(groupsUrl) {
+                parameter("select", "group_guid,group_name,faculty,program_type,course")
+                parameter("order", "group_name.asc")
+                parameter("limit", PAGE_SIZE)
+                parameter("offset", offset)
+            }.body()
+            result += page
+            if (page.size < PAGE_SIZE) break
+            offset += PAGE_SIZE
+        }
+        return result
+    }
 
-    /** Поиск групп по подстроке названия (на стороне сервера). */
+    /** Поиск групп по подстроке названия (ilike на стороне сервера). */
     suspend fun getGroups(name: String): List<Group> = client.get(groupsUrl) {
         parameter("select", "group_guid,group_name,faculty,program_type,course")
         parameter("order", "group_name.asc")
-        parameter("group_name", "ilike.*${name.filterNot { it == '%' }}*")
+        parameter("limit", PAGE_SIZE)
+        parameter("group_name", "ilike.*${sanitizeLikeParam(name)}*")
     }.body()
 
     /** Преподаватели и их кафедры. */
@@ -48,11 +66,11 @@ class RestClient {
     }.body()
 
     /**
-     * Расписание группы за период через RPC group_week.
-     * @param from ISO-дата начала периода
-     * @param to ISO-дата конца периода
+     * Одна неделя расписания группы через RPC group_week.
+     * Сервер допускает интервал не длиннее недели ("invalid range" при большем),
+     * поэтому семестр загружается побуквенно неделями (см. ScheduleRepository.syncSemester).
      */
-    suspend fun getSchedule(groupGuid: String, from: String, to: String): List<WeekLesson> =
+    suspend fun getScheduleWeek(groupGuid: String, from: String, to: String): List<WeekLesson> =
         client.get(weekRpcUrl) {
             parameter("p_group_guid", groupGuid)
             parameter("p_from", from)
@@ -61,7 +79,7 @@ class RestClient {
             parameter(
                 "select",
                 "day,period,discipline,workload_type,room,building,campus," +
-                        "teacher_name,teacher_names,instructor_names,subgroup,approved"
+                        "teacher_name,teacher_names,instructor_names,instructor_departments,subgroup,approved"
             )
         }.body()
 }

@@ -1,6 +1,6 @@
 -- Ключ-значение: офлайн-кэш ответов API (снимок расписания, список групп)
 getMeta:
-SELECT :key AS key, value FROM meta WHERE key = :key;
+SELECT m.key AS key, m.value AS value FROM meta m WHERE m.key = :key;
 
 setMeta:
 INSERT OR REPLACE INTO meta(key, value) VALUES(:key, :value);
