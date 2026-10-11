@@ -15,9 +15,21 @@ actual fun createSqlDriver(): SqlDriver {
     val dbFile = File(dir, "plesson.db")
     val url = "jdbc:sqlite:${dbFile.absolutePath}"
     val driver = JdbcSqliteDriver(url)
+    // Штатная инициализация: новая база создаётся целиком, старая — мигрируется.
+    if (!driver.fileHasTables()) {
+        PlessonDatabase.Schema.create(driver)
+    } else {
+        try {
+            // user_version у SQLDelight-файлов соответствует версии схемы;
+            // на старых файлах (0) это безопасно no-op либо домиграция.
+            PlessonDatabase.Schema.migrate(driver, driver.schemaVersion(), PlessonDatabase.Schema.version)
+        } catch (_: Exception) {
+            // старый файл без номера схемы или с битыми метаданными — починим ниже
+        }
+    }
     // Идемпотентная доинициализация схемы: чинит старые файлы БД, в которых
     // нет новых таблиц (например, class_periods), и базы с оборванной
     // миграцией. См. SchemaRepair.kt.
-    ensureDesktopSchema(driver, PlessonDatabase.Schema)
+    ensureDesktopSchema(driver)
     return driver
 }
