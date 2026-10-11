@@ -6,6 +6,7 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 
+/** Web (Kotlin/JS): HTTP через движок Ktor CIO. */
 actual fun createHttpClient(): HttpClient {
     return HttpClient(CIO) {
         install(ContentNegotiation) {

@@ -3,9 +3,8 @@ selectAllTeachers:
 SELECT * FROM teachers ORDER BY teacher_name ASC;
 
 upsertTeacher:
-INSERT INTO teachers(teacher_slug, teacher_name)
-VALUES(:slug, :name)
-ON CONFLICT(teacher_slug) DO UPDATE SET teacher_name = excluded.teacher_name;
+INSERT OR REPLACE INTO teachers(teacher_slug, teacher_name)
+VALUES(:slug, :name);
 
 replaceDepartments:
 DELETE FROM teacher_departments WHERE slug = :slug;

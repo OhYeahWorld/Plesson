@@ -14,6 +14,12 @@ sqldelight {
     databases {
         create("PlessonDatabase") {
             packageName.set("rea.ohyeahworld.plesson")
+            // Явно указываем каталог со схемой (.sq/.sqm) и запросами.
+            // Без этого плагин не находит базу и падает с ошибкой
+            // "SQLDelight Gradle plugin was applied but there are no databases set up".
+            srcDirs.setFrom("src/commonMain/sqldelight")
+            // Схема описана миграцией 0001.sqm — разрешаем её как начальную.
+            deriveSchemaFromMigrations.set(true)
         }
     }
 }
@@ -31,6 +37,10 @@ kotlin {
 
     jvm()
 
+    // В новых версиях Kotlin Multiplatform блоки targets объявляются через builder-функции
+    // `js { ... }` / `wasmJs { ... }`, а не через устаревшие свойства `target.js { }`.
+    // Старый синтаксис (`js("browser")`/свойство `js`) давал ошибку
+    // "Unresolved reference 'js'" при конфигурации Gradle.
     js {
         browser()
     }
@@ -78,19 +88,18 @@ kotlin {
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
-            implementation(libs.ktor.client.js)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
             implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
             implementation(libs.sqldelight.runtime)
-            // УБРАЛИ logback отсюда!
         }
 
         // Добавляем logback ТОЛЬКО для JVM
         jvmMain.dependencies {
             implementation("ch.qos.logback:logback-classic:1.5.16")
             implementation(libs.sqldelight.jvm.driver)
+            implementation(libs.ktor.client.cio)
         }
 
         iosMain.dependencies {
@@ -104,6 +113,11 @@ kotlin {
 
         jsMain.dependencies {
             implementation(libs.wrappers.browser)
+            implementation(libs.ktor.client.cio)
+        }
+
+        wasmJsMain.dependencies {
+            implementation(libs.ktor.client.cio)
         }
     }
 }

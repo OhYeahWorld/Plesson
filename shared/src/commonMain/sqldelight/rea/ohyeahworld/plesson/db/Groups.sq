@@ -9,13 +9,8 @@ ORDER BY group_name ASC
 LIMIT 100;
 
 upsertGroup:
-INSERT INTO groups(group_guid, group_name, faculty, program_type, course)
-VALUES(:guid, :name, :faculty, :program_type, :course)
-ON CONFLICT(group_guid) DO UPDATE SET
-    group_name = excluded.group_name,
-    faculty = excluded.faculty,
-    program_type = excluded.program_type,
-    course = excluded.course;
+INSERT OR REPLACE INTO groups(group_guid, group_name, faculty, program_type, course)
+VALUES(:guid, :name, :faculty, :program_type, :course);
 
 groupByName:
 SELECT * FROM groups WHERE group_name = :name LIMIT 1;
