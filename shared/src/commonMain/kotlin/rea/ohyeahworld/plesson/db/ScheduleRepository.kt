@@ -13,14 +13,14 @@ import rea.ohyeahworld.plesson.PlessonDatabase
 import rea.ohyeahworld.plesson.api.RestClient
 import rea.ohyeahworld.plesson.api.entity.Group
 import rea.ohyeahworld.plesson.api.entity.Lesson
+import rea.ohyeahworld.plesson.api.Semester
 import rea.ohyeahworld.plesson.api.entity.WeekLesson
-import rea.ohyeahworld.plesson.api.generateDemoWeek
 import rea.ohyeahworld.plesson.api.sanitizeLikeParam
 
 /**
  * Data Access Layer (Тема 3.1): единственный источник данных для UI — локальная SQLite.
- * Синхронизация наполняет её из внешнего API pleh.tech; при отсутствии сети
- * используется детерминированный демо-набор, чтобы приложение всегда что-то показывало.
+ * При первом успешном подключении расписание семестра сохраняется в базу,
+ * и дальше приложение работает офлайн с кэшированными данными.
  */
 class ScheduleRepository(driver: SqlDriver) {
 
@@ -113,25 +113,23 @@ class ScheduleRepository(driver: SqlDriver) {
         }
 
     /**
-     * Синхронизация недели: API → транзакция → SQLite.
-     * Возвращает true, если данные взяты из сети; false — если применён демо-режим.
+     * Синхронизация расписания группы на весь семестр: API → транзакция → SQLite.
+     * Возвращает true, если данные получены из сети и сохранены; false — сеть недоступна
+     * (в этом случае в базе остаётся ранее сохранённое расписание).
      */
-    suspend fun syncWeek(groupGuid: String, anyDateOfTheWeek: LocalDate): Boolean =
+    suspend fun syncSemester(groupGuid: String, today: LocalDate): Boolean =
         withContext(Dispatchers.IO) {
-            val monday = weekMonday(anyDateOfTheWeek)
-            val from = monday.toString()
-            val to = weekSunday(anyDateOfTheWeek).toString()
-
+            val (semesterStart, semesterEnd) = Semester.bounds(today)
             val remote: List<WeekLesson>? = runCatching {
-                restClient.getWeekSchedule(groupGuid, from, to)
-            }.getOrNull()?.takeIf { list: List<WeekLesson> -> list.isNotEmpty() }
+                restClient.getSchedule(groupGuid, semesterStart.toString(), semesterEnd.toString())
+            }.getOrNull()?.takeIf { it.isNotEmpty() }
 
-            val source: List<WeekLesson> = remote ?: generateDemoWeek(groupGuid, anyDateOfTheWeek)
-            writeWeek(groupGuid, from, to, source)
-            remote != null
+            if (remote == null) return@withContext false
+            writeRange(groupGuid, semesterStart.toString(), semesterEnd.toString(), remote)
+            true
         }
 
-    private fun writeWeek(groupGuid: String, from: String, to: String, items: List<WeekLesson>) {
+    private fun writeRange(groupGuid: String, from: String, to: String, items: List<WeekLesson>) {
         val now = kotlin.time.Clock.System.now().toString()
         db.transactionWithResult<Unit>(false) {
             teachersQ.unlinkByLessonIds(groupGuid, from, to)
@@ -166,6 +164,11 @@ class ScheduleRepository(driver: SqlDriver) {
                 }
             }
         }
+    }
+
+    /** Есть ли в базе хоть одно занятие группы (т.е. расписание уже синхронизировано). */
+    suspend fun hasLessons(groupGuid: String): Boolean = withContext(Dispatchers.IO) {
+        lessonsQ.countByGroup(groupGuid).executeAsOne() > 0L
     }
 
     // ------------------------------------------------------------- Teachers

@@ -23,3 +23,6 @@ VALUES(
 
 lastInsertRowId:
 SELECT last_insert_rowid();
+
+countByGroup:
+SELECT count(*) FROM lessons WHERE group_guid = :group_guid;
